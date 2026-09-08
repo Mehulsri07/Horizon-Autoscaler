@@ -1,0 +1,33 @@
+# Git attributes for Horizon Autoscaler
+# Ensures consistent line endings across Windows/Linux/macOS contributors.
+
+# ─── Default: auto-detect text files and normalize LF on commit ──────────────
+* text=auto eol=lf
+
+# ─── Explicitly text ─────────────────────────────────────────────────────────
+*.go        text eol=lf
+*.mod       text eol=lf
+*.sum       text eol=lf
+*.md        text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+*.json      text eol=lf
+*.sh        text eol=lf
+*.env       text eol=lf
+Dockerfile  text eol=lf
+Makefile    text eol=lf
+.gitignore  text eol=lf
+.gitattributes text eol=lf
+
+# ─── Explicitly binary — never touch line endings ────────────────────────────
+*.exe    binary
+*.dll    binary
+*.so     binary
+*.dylib  binary
+*.png    binary
+*.jpg    binary
+*.gif    binary
+*.ico    binary
+*.gz     binary
+*.zip    binary
+*.tar    binary

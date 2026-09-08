@@ -1,0 +1,5 @@
+# manifests/
+#
+# Kubernetes resource manifests land here in Phase 5:
+#   deployment.yaml  — 2 replicas, readiness/liveness probes on /healthz
+#   service.yaml     — ClusterIP routing to the Deployment's pods

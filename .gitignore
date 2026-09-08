@@ -1,0 +1,74 @@
+# Horizon Autoscaler — .gitignore
+
+# ─── Context / planning markdowns (local reference docs, not for repo) ───────
+design.md
+requirements.md
+tasks.md
+
+# ─── Go ──────────────────────────────────────────────────────────────────────
+# Compiled binaries / executables
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+app/horizon-app
+app/horizon-app.exe
+
+# Test binary and profiling output
+*.test
+*.out
+*.prof
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Dependency vendor directory (only ignore if you don't vendor)
+# vendor/
+
+# Build output directory
+dist/
+bin/
+
+# ─── Docker ──────────────────────────────────────────────────────────────────
+# Local container override files
+docker-compose.override.yml
+docker-compose.local.yml
+
+# ─── Kubernetes / kind ───────────────────────────────────────────────────────
+# Local kubeconfig overrides
+kubeconfig.local
+
+# Helm chart lock files (if added later)
+charts/*.lock
+
+# ─── IDE / Editor ────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ─── OS ──────────────────────────────────────────────────────────────────────
+Desktop.ini
+ehthumbs.db
+
+# ─── Secrets & env ───────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+secrets/
+
+# ─── Logs & temp ─────────────────────────────────────────────────────────────
+*.log
+tmp/
+temp/
+
+# ─── context markdowns ──────────────────────────────────────────────────────────────────────
+design.m
