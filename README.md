@@ -23,16 +23,16 @@ Reactive autoscaling only reacts *after* load has already increased, which means
 ## Architecture
 
 ```
-Terraform              → provisions AWS infrastructure (EKS cluster, node groups)
+Terraform               → provisions AWS infrastructure (EKS cluster, node groups)
 AWS EKS / local kind    → Kubernetes control plane
 Kubernetes              → schedules, scales, heals containers
 Docker                  → packages the sample app as a container image
 Sample app              → minimal API used as the scaling target
-Prometheus / Grafana     → metrics collection + visualization
-Load generator            → seasonal synthetic traffic OR replayed historical trace
-Decision Engine            → Prometheus metrics → forecast → max(predicted, reactive) → replica count
-Actuator                    → applies the replica count to the cluster (later: KEDA External Scaler)
-Decision Visualizer           → shows *why* a scaling decision was made, not just cluster state
+Prometheus / Grafana    → metrics collection + visualization
+Load generator          → seasonal synthetic traffic OR replayed historical trace
+Decision Engine         → Prometheus metrics → forecast → max(predicted, reactive) → replica count
+Actuator                → applies the replica count to the cluster (later: KEDA External Scaler)
+Decision Visualizer     → shows *why* a scaling decision was made, not just cluster state
 ```
 
 ### Design principles
