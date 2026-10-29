@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loadlab-backend
+  namespace: loadlab
+  labels:
+    app.kubernetes.io/name: loadlab-backend
+  annotations:
+    # Per-pod capacity at the 200 ms p95 SLO, from LoadLab results/capacity.json.
+    horizon.dev/rps-per-pod: "40"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: loadlab-backend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: loadlab-backend
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: backend
+          image: loadlab-backend:local
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: APP_VERSION
+              value: local
+          ports:
+            - name: http
+              containerPort: 3000
+            - name: admin
+              containerPort: 9091
+          resources:
+            requests:
+              cpu: 250m
+              memory: 64Mi
+            limits:
+              cpu: "1"
+              memory: 128Mi
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 2
+            failureThreshold: 1
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              # Native sleep: distroless has no shell. Gives kube-proxy time to drop the endpoint.
+              sleep:
+                seconds: 5
+          securityContext:
+            runAsNonRoot: true
+            # The image USER is the name "nonroot"; kubelet needs the numeric UID to verify runAsNonRoot.
+            runAsUser: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true

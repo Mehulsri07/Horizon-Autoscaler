@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: loadlab-backend
+  namespace: loadlab
+  labels:
+    app.kubernetes.io/name: loadlab-backend
+spec:
+  selector:
+    app.kubernetes.io/name: loadlab-backend
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http

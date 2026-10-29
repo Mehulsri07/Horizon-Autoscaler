@@ -1,40 +1,27 @@
-# Horizon Autoscaler — Makefile
+# Horizon Lab — local kind lab for the LoadLab backend
 #
-# Targets:
-#   make build      Build the Go binary locally
-#   make test       Run all tests
-#   make test-race  Run tests with the race detector (requires CGO / Linux/macOS)
-#   make vet        Run go vet
-#   make run        Run the service locally on :8080
-#   make clean      Remove local build artifacts
+#   make cluster-up    Create the kind cluster and load the backend image
+#   make deploy        Apply the manifests and wait for the rollout
+#   make validate      Validate the manifests offline with kubeconform
+#   make cluster-down  Delete the kind cluster
 
-APP_DIR   := ./app
-BINARY    := $(APP_DIR)/horizon-app
-PORT      ?= 8080
-WORK_MS   ?= 100
+CLUSTER := horizon-lab
+IMAGE   := loadlab-backend:local
 
-.PHONY: build test test-race vet run clean
+.PHONY: cluster-up deploy validate cluster-down
 
-## build: Compile the Go binary into app/horizon-app
-build:
-	cd $(APP_DIR) && go build -o horizon-app .
+cluster-up:
+	kind create cluster --config deploy/kind/cluster.yaml
+	kind load docker-image $(IMAGE) --name $(CLUSTER)
 
-## test: Run all unit and integration tests
-test:
-	cd $(APP_DIR) && go test -v ./...
+# The namespace goes first: a directory apply runs files alphabetically.
+deploy:
+	kubectl apply -f deploy/loadlab/namespace.yaml
+	kubectl apply -f deploy/loadlab/
+	kubectl -n loadlab rollout status deploy/loadlab-backend --timeout=120s
 
-## test-race: Run tests with the Go race detector (needs CGO + 64-bit GCC)
-test-race:
-	cd $(APP_DIR) && go test -v -race ./...
+validate:
+	docker run --rm -v "$(CURDIR)/deploy:/d" ghcr.io/yannh/kubeconform:v0.6.7 -strict -summary /d/loadlab
 
-## vet: Run go vet on all packages
-vet:
-	cd $(APP_DIR) && go vet ./...
-
-## run: Build and run the service locally
-run: build
-	$(BINARY) -port $(PORT)
-
-## clean: Remove compiled binaries
-clean:
-	rm -f $(APP_DIR)/horizon-app $(APP_DIR)/horizon-app.exe
+cluster-down:
+	kind delete cluster --name $(CLUSTER)
