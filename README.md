@@ -89,7 +89,9 @@ Phases are tracked in the [design spec phase table](docs/superpowers/specs/2026-
 git clone <repo-url>
 cd horizon
 
-# Local cluster (Phase 1)
-kind create cluster --name horizon
-kubectl apply -f manifests/
+# Local cluster (Phase 1): needs Docker, kind and the loadlab-backend:local image from LoadLab
+make cluster-up   # kind cluster "horizon-lab" + load the image
+make deploy       # namespace first, then deploy/loadlab/
+make validate     # kubeconform
+make cluster-down
 ```
