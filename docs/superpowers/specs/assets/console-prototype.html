@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Horizon Lab Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.min.css">
+<script src="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.min.js"></script>
+<style>
+  /* Tokens: IntelliOps console values, so both consoles read as one product. RGB channels.
+     series-1/2 are the chart pair (actual / forecast), validated for colour-blind separation on both surfaces. */
+  :root, :root[data-theme="dark"] {
+    --ground: 10 10 10; --raised: 17 17 17; --sunken: 0 0 0;
+    --surface: 20 20 20; --surface-2: 26 26 26; --surface-3: 36 36 36;
+    --ink: 237 237 237; --ink-2: 180 180 180; --ink-3: 156 156 156;
+    --line: 36 36 36; --line-strong: 46 46 46;
+    --signal: 82 168 255; --on-signal: 4 18 31;
+    --series-1: 57 135 229; --series-2: 217 89 38;
+    --ok: 98 192 115; --warn: 255 178 36; --crit: 255 99 105; --attn: 191 122 240;
+  }
+  :root[data-theme="light"] {
+    --ground: 250 250 250; --raised: 255 255 255; --sunken: 242 242 242;
+    --surface: 247 247 247; --surface-2: 240 240 240; --surface-3: 232 232 232;
+    --ink: 23 23 23; --ink-2: 74 74 74; --ink-3: 92 92 92;
+    --line: 228 228 228; --line-strong: 214 214 214;
+    --signal: 0 96 196; --on-signal: 255 255 255;
+    --series-1: 0 96 196; --series-2: 217 89 38;
+    --ok: 24 121 52; --warn: 166 99 0; --crit: 206 32 41; --attn: 130 60 190;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: rgb(var(--ground)); color: rgb(var(--ink));
+    font: 14px/1.45 "Geist", ui-sans-serif, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  ::selection { background: rgb(var(--signal) / .28); }
+  .mono { font-family: "Geist Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+  .muted { color: rgb(var(--ink-3)); }
+  .app { max-width: 1440px; margin: 0 auto; padding: 16px; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  button:disabled { cursor: not-allowed; opacity: .45; }
+  :focus-visible { outline: 2px solid rgb(var(--signal)); outline-offset: 2px; }
+
+  /* No overflow:hidden here: it would clip the "More" menu. Corners are rounded per child instead. */
+  .shell { border: 1px solid rgb(var(--line-strong)); border-radius: 10px; background: rgb(var(--ground)); }
+  .bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 16px; border-radius: 9px 9px 0 0;
+    background: rgb(var(--raised)); border-bottom: 1px solid rgb(var(--line)); }
+  .brand { font-weight: 600; font-size: 15px; }
+  .badge { font-size: 12px; font-weight: 500; color: rgb(var(--ink-3)); border: 1px solid rgb(var(--line-strong));
+    border-radius: 999px; padding: 1px 8px; margin-left: 6px; }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip { font-size: 12px; color: rgb(var(--ink-2)); border: 1px solid rgb(var(--line)); border-radius: 999px; padding: 2px 10px;
+    display: inline-flex; align-items: center; gap: 6px; background: rgb(var(--surface)); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: rgb(var(--ok)); flex: none; }
+  .dot.warn { background: rgb(var(--warn)); } .dot.crit { background: rgb(var(--crit)); }
+  .dot.attn { background: rgb(var(--attn)); } .dot.off { background: rgb(var(--ink-3)); }
+  .spacer { flex: 1; }
+  .icon { border: 1px solid rgb(var(--line-strong)); background: none; border-radius: 6px; width: 32px; height: 30px; }
+
+  .toolbar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 10px 16px; border-bottom: 1px solid rgb(var(--line)); }
+  .group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .glabel { font-size: 12px; color: rgb(var(--ink-3)); }
+  .seg { display: inline-flex; border: 1px solid rgb(var(--line-strong)); border-radius: 6px; overflow: hidden; }
+  .seg button { background: none; border: 0; border-right: 1px solid rgb(var(--line-strong)); padding: 5px 11px; font-size: 13px; color: rgb(var(--ink-2)); }
+  .seg button:last-child { border-right: 0; }
+  .seg button[aria-checked="true"] { background: rgb(var(--signal) / .14); color: rgb(var(--signal)); font-weight: 500; }
+  .btn { background: none; border: 1px solid rgb(var(--line-strong)); border-radius: 6px; padding: 5px 12px; font-size: 13px; }
+  .btn:not(:disabled):hover { background: rgb(var(--surface-2)); }
+  .btn.primary { background: rgb(var(--signal)); border-color: rgb(var(--signal)); color: rgb(var(--on-signal)); font-weight: 600; }
+  .btn.primary:not(:disabled):hover { background: rgb(var(--signal) / .85); }
+  details.menu { position: relative; }
+  details.menu summary { list-style: none; } details.menu summary::-webkit-details-marker { display: none; }
+  .menu-pop { position: absolute; z-index: 5; top: calc(100% + 4px); right: 0; min-width: 190px; padding: 4px;
+    background: rgb(var(--raised)); border: 1px solid rgb(var(--line-strong)); border-radius: 8px; }
+  .menu-pop button { display: block; width: 100%; text-align: left; background: none; border: 0; border-radius: 5px; padding: 7px 10px; font-size: 13px; }
+  .menu-pop button:not(:disabled):hover { background: rgb(var(--surface-2)); }
+
+  .layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; }
+  .main { padding: 14px 16px; display: grid; gap: 12px; border-right: 1px solid rgb(var(--line)); min-width: 0; }
+  .tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+  .tile { background: rgb(var(--surface)); border: 1px solid rgb(var(--line)); border-radius: 8px; padding: 10px 12px; }
+  .tile .k { font-size: 12px; color: rgb(var(--ink-3)); }
+  .tile .v { font-size: 22px; font-weight: 600; margin-top: 2px; white-space: nowrap; }
+  .tile .v small { font-size: 14px; font-weight: 500; color: rgb(var(--ink-3)); }
+  .tile .s { font-size: 12px; color: rgb(var(--ink-3)); }
+  .good { color: rgb(var(--ok)); } .bad { color: rgb(var(--crit)); } .amber { color: rgb(var(--warn)); }
+  .card { background: rgb(var(--surface)); border: 1px solid rgb(var(--line)); border-radius: 8px; padding: 12px 14px; min-width: 0; }
+  .card-h { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+  .card-h h2 { font-size: 13px; font-weight: 600; margin: 0; }
+  .hint { padding: 28px 12px; text-align: center; color: rgb(var(--ink-3)); }
+
+  /* Timeline: stacked panes on one time axis. Headers start at the plot's left edge (the 48px y-axis gutter). */
+  .tl-time { margin-left: auto; font-size: 12px; color: rgb(var(--ink-2)); }
+  .pane + .pane { border-top: 1px solid rgb(var(--line)); margin-top: 10px; padding-top: 10px; }
+  .pane-h { display: flex; align-items: baseline; gap: 6px 14px; flex-wrap: wrap; padding-left: 48px; margin-bottom: 4px; min-height: 20px; }
+  .pane-t { font-size: 13px; font-weight: 600; }
+  .pane-u { font-size: 12px; color: rgb(var(--ink-3)); margin-left: -8px; }
+  .read { margin-left: auto; display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: rgb(var(--ink-2)); }
+  .read span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .read b { font-family: "Geist Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; font-weight: 500; color: rgb(var(--ink)); }
+  .key { display: inline-block; width: 16px; height: 0; border-top: 2px solid var(--k); }
+  .key.dash { border-top-style: dashed; }
+  .key.wash { height: 10px; border: 0; border-radius: 2px; background: var(--k); opacity: .35; }
+  .toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: rgb(var(--ink-3)); cursor: pointer; }
+  .toggle input { accent-color: rgb(var(--signal)); margin: 0; }
+  .chart { width: 100%; }
+  .chart .u-over { cursor: crosshair; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid rgb(var(--line)); }
+  th { font-weight: 500; color: rgb(var(--ink-3)); font-size: 12px; }
+  td.num { font-family: "Geist Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+  .tag { display: inline-block; font-size: 12px; padding: 0 8px; border-radius: 999px; background: rgb(var(--surface-3)); color: rgb(var(--ink-2)); margin-right: 4px; }
+  .tag.best { background: rgb(var(--ok) / .14); color: rgb(var(--ok)); }
+
+  .rail { padding: 14px; display: grid; gap: 10px; align-content: start; background: rgb(var(--raised)); border-radius: 0 0 9px 0; }
+  .rail-h { display: flex; justify-content: space-between; align-items: center; }
+  .rail-h h2 { font-size: 13px; font-weight: 600; margin: 0; }
+  .inc { border: 1px solid rgb(var(--line-strong)); border-radius: 8px; padding: 10px 12px; background: rgb(var(--surface)); }
+  .inc.done { opacity: .72; }
+  .inc .h { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; }
+  .inc .d { font-size: 13px; color: rgb(var(--ink-2)); margin-top: 4px; }
+  .inc .m { font-size: 12px; color: rgb(var(--ink-3)); margin-top: 4px; }
+  .inc .acts { display: flex; gap: 8px; margin-top: 10px; }
+  .approve { background: rgb(var(--ok)); border: 1px solid rgb(var(--ok)); color: rgb(var(--ground)); border-radius: 6px; padding: 5px 14px; font-weight: 600; font-size: 13px; }
+  .reject { background: none; border: 1px solid rgb(var(--line-strong)); border-radius: 6px; padding: 5px 14px; font-size: 13px; }
+  .pill { font-size: 12px; padding: 0 8px; border-radius: 999px; }
+  .pill.rev { background: rgb(var(--ok) / .14); color: rgb(var(--ok)); }
+  .empty { font-size: 13px; color: rgb(var(--ink-3)); border: 1px dashed rgb(var(--line-strong)); border-radius: 8px; padding: 14px; }
+  @media (prefers-reduced-motion: no-preference) {
+    .dot.pulse { animation: pulse 1.4s ease-in-out infinite; }
+    @keyframes pulse { 50% { opacity: .35; } }
+  }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  .proto { margin-top: 14px; font-size: 13px; color: rgb(var(--ink-3)); display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
+    border: 1px dashed rgb(var(--line-strong)); border-radius: 8px; padding: 10px 14px; }
+  .proto label { display: inline-flex; gap: 6px; align-items: center; color: rgb(var(--ink-2)); }
+
+  @media (max-width: 1100px) { .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  @media (max-width: 920px) {
+    .layout { grid-template-columns: 1fr; }
+    .main { border-right: 0; border-bottom: 1px solid rgb(var(--line)); }
+    .rail { border-radius: 0 0 9px 9px; }
+  }
+  @media (max-width: 560px) {
+    .app { padding: 8px; }
+    .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .toolbar .spacer { display: none; }
+    .pane-h { padding-left: 0; }
+    .read { margin-left: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="shell">
+    <header class="bar">
+      <div class="brand">Horizon Lab<span class="badge">prototype</span></div>
+      <div class="chips">
+        <span class="chip"><i class="dot"></i>kind · horizon-lab</span>
+        <span class="chip" id="chip-fc"></span>
+        <span class="chip" id="chip-io"></span>
+      </div>
+      <span class="spacer"></span>
+      <span id="clock" class="mono muted">Day not started</span>
+      <button id="theme" class="icon" aria-label="Switch theme" title="Switch theme">◐</button>
+    </header>
+
+    <div class="toolbar">
+      <div class="group">
+        <span class="glabel" id="lbl-model">Scaling</span>
+        <div class="seg" role="radiogroup" aria-labelledby="lbl-model" id="model-seg">
+          <button role="radio" data-model="reactive">Reactive</button>
+          <button role="radio" data-model="naive">Naive</button>
+          <button role="radio" data-model="hw">Holt-Winters</button>
+          <button role="radio" data-model="gbm">GBM</button>
+        </div>
+      </div>
+      <div class="group" role="group" aria-label="Scenarios">
+        <button id="run" class="btn primary">▶ Run day</button>
+        <button class="btn" data-sc="spike">Surprise spike</button>
+        <button class="btn" data-sc="leak">Memory leak</button>
+        <button class="btn" data-sc="bad">Bad deploy</button>
+        <details class="menu" id="more">
+          <summary class="btn" role="button">More ▾</summary>
+          <div class="menu-pop">
+            <button data-sc="fc" id="fc-btn">Kill forecaster</button>
+            <button data-sc="clear">Clear all faults</button>
+          </div>
+        </details>
+      </div>
+      <span class="spacer"></span>
+      <div class="group">
+        <span class="glabel" id="lbl-view">View</span>
+        <div class="seg" role="radiogroup" aria-labelledby="lbl-view" id="range-seg">
+          <button role="radio" data-range="day">Whole day</button>
+          <button role="radio" data-range="15m">Last 15 min</button>
+        </div>
+        <span class="glabel" id="lbl-speed">Speed</span>
+        <div class="seg" role="radiogroup" aria-labelledby="lbl-speed" id="speed-seg">
+          <button role="radio" data-speed="2">1×</button>
+          <button role="radio" data-speed="4">2×</button>
+          <button role="radio" data-speed="10">5×</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="layout">
+      <section class="main" aria-label="Lab metrics">
+        <div class="tiles" id="tiles"></div>
+
+        <div class="card">
+          <div class="card-h"><h2>Timeline</h2><span class="muted" style="font-size:12px">Hover any panel to read all four at that moment</span><span class="tl-time mono" id="t-read"></span></div>
+          <div id="charts-hint" class="hint">Press <b>Run day</b> to play a compressed 24 h of traffic. In the real lab one day lasts 60 min; here it plays in about a minute.</div>
+          <div id="charts">
+            <div class="pane">
+              <div class="pane-h"><span class="pane-t">Traffic</span><span class="pane-u">req/s</span>
+                <label class="toggle"><input type="checkbox" id="shadow-toggle"> other models</label>
+                <span class="read" id="r-traffic"></span></div>
+              <div class="chart" id="c-traffic"></div>
+            </div>
+            <div class="pane">
+              <div class="pane-h"><span class="pane-t">Replicas</span><span class="read" id="r-rep"></span></div>
+              <div class="chart" id="c-rep"></div>
+            </div>
+            <div class="pane">
+              <div class="pane-h"><span class="pane-t">p95 latency</span><span class="pane-u">ms</span><span class="read" id="r-lat"></span></div>
+              <div class="chart" id="c-lat"></div>
+            </div>
+            <div class="pane">
+              <div class="pane-h"><span class="pane-t">Memory per pod</span><span class="pane-u">MB</span><span class="read" id="r-mem"></span></div>
+              <div class="chart" id="c-mem"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><h2>Runs this session</h2><span class="muted" style="font-size:12px">Same traffic seed every run. Runs with injected faults or a mid-run model switch don't count toward “best”.</span></div>
+          <div id="runs"></div>
+        </div>
+      </section>
+
+      <aside class="rail" aria-label="Incidents">
+        <div class="rail-h"><h2>Incidents</h2><span class="chip" id="io-mini"></span></div>
+        <div id="incidents"></div>
+        <div id="announcer" class="sr" role="status" aria-live="polite"></div>
+      </aside>
+    </div>
+  </div>
+
+  <div class="proto">
+    <strong style="color:rgb(var(--ink-2))">Prototype only</strong>
+    <label><input type="checkbox" id="io-toggle" checked> IntelliOps connected</label>
+    <span>Simulated data. The real console reads the same values from Prometheus, KEDA and IntelliOps through the console API.</span>
+  </div>
+</div>
+
+<script>
+(() => {
+  // ---- constants (compressed day: 240 steps × 15 s = 60 lab-minutes = 24 "clock" hours)
+  const STEPS = 240, STEP_S = 15, LEAD = 8, POD_START = 8, TARGET = 24, MINR = 2, MAXR = 12, SCALE = 215;
+  const SLO = 200, HITL_MS = 60000, AX = 48;
+  const MODELS = ['naive', 'hw', 'gbm'];
+  const NAME = { reactive: 'Reactive', naive: 'Naive', hw: 'Holt-Winters', gbm: 'GBM' };
+  const NOISE = { naive: 0.10, hw: 0.06, gbm: 0.035 };
+
+  const $ = (s) => document.querySelector(s);
+  const $$ = (s) => [...document.querySelectorAll(s)];
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+  function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  function gaussGen(rng) { return () => Math.sqrt(-2 * Math.log(rng() || 1e-9)) * Math.cos(2 * Math.PI * rng()); }
+  const pattern = (h) => { const g = (m, s) => Math.exp(-0.5 * ((h - m) / s) ** 2);
+    return 0.10 + 0.5 * g(9.5, 1.4) + 0.85 * g(13, 0.6) + 0.4 * g(16, 1.8) + 0.6 * g(20, 1.2); };
+  const hourOf = (t) => t / STEPS * 24;
+  const fmtClock = (t) => { const m = Math.round(hourOf(t) * 60); return String(Math.floor(m / 60) % 24).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
+
+  // ---- state
+  const S = {
+    running: false, t: 0, model: 'hw', speed: 4, range: 'day', theme: 'dark', intelli: true,
+    fcDown: false, leak: false, bad: false, spikeAt: null, mem: 140, leakEp: 0, badEp: 0,
+    pods: [], rawHist: [], slo: 0, repMin: 0, peak: 0, overStreak: 0, okStreak: 0, errs: [],
+    incidents: [], incVer: 0, markers: [], runs: [], run: null, timer: null, noise: null, started: false,
+  };
+  const A = {};
+  const blank = () => new Array(STEPS + 1).fill(null);
+  function resetArrays() {
+    A.x = [...Array(STEPS + 1).keys()];
+    A.actual = blank(); A.ready = blank(); A.desired = blank(); A.p95 = blank(); A.mem = blank();
+    A.pred = Object.fromEntries(MODELS.map((m) => [m, blank()]));
+  }
+  function makeNoise() {
+    const g = gaussGen(mulberry32(20261029));
+    const arr = (sd) => Array.from({ length: STEPS + LEAD + 1 }, () => g() * sd);
+    return { actual: arr(0.04), lat: arr(0.05), naive: arr(NOISE.naive), hw: arr(NOISE.hw), gbm: arr(NOISE.gbm) };
+  }
+  const predFor = (m, s) => Math.max(0, pattern(hourOf(s)) * SCALE * (1 + S.noise[m][s]));
+  const predictiveNow = () => S.model !== 'reactive' && !S.fcDown;
+
+  // ---- colors (read from tokens; canvas wants comma rgb)
+  const C = {};
+  function readColors() {
+    const cs = getComputedStyle(document.documentElement);
+    for (const k of ['ink', 'ink-2', 'ink-3', 'line', 'line-strong', 'surface', 'surface-3', 'signal', 'series-1', 'series-2', 'ok', 'warn', 'crit', 'attn'])
+      C[k] = 'rgb(' + cs.getPropertyValue('--' + k).trim().split(/\s+/).join(',') + ')';
+    C.alpha = (k, a) => C[k].replace('rgb(', 'rgba(').replace(')', ',' + a + ')');
+  }
+
+  // ---- charts
+  let charts = [], hoverIdx = null, showShadows = false;
+  const px = (n) => n * (devicePixelRatio || 1);
+  function xRange() {
+    if (S.range === 'day') return [0, STEPS];
+    const end = Math.max(60, S.t); return [end - 60, end];
+  }
+  // Snap a canvas x to the pixel grid so 1px rules stay crisp instead of smearing over two pixels.
+  const crispX = (u, v) => Math.round(u.valToPos(v, 'x', true)) + 0.5;
+
+  // Under the series: forecast window, SLO band, event rules and the "now" rule. Over the series: event flags.
+  const overlay = (pane) => ({ hooks: {
+    drawAxes: [(u) => {
+      const ctx = u.ctx, { left, top, width, height } = u.bbox;
+      ctx.save(); ctx.beginPath(); ctx.rect(left, top, width, height); ctx.clip(); ctx.lineWidth = px(1);
+      if (pane === 'traffic' && S.started && predictiveNow() && S.t > 0) {
+        const a = u.valToPos(S.t - 1, 'x', true), b = u.valToPos(Math.min(S.t - 1 + LEAD, STEPS), 'x', true);
+        ctx.fillStyle = C.alpha('series-2', 0.08); ctx.fillRect(a, top, b - a, height);
+      }
+      if (pane === 'lat') {
+        const y = Math.round(u.valToPos(SLO, 'y', true)) + 0.5;
+        ctx.fillStyle = C.alpha('crit', 0.05); ctx.fillRect(left, top, width, y - top);
+        ctx.strokeStyle = C.alpha('crit', 0.65); ctx.setLineDash([px(4), px(4)]);
+        ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(left + width, y); ctx.stroke(); ctx.setLineDash([]);
+      }
+      ctx.strokeStyle = C.alpha('ink-3', 0.4);
+      for (const m of S.markers) { const x = crispX(u, m.t); ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, top + height); ctx.stroke(); }
+      if (S.started && S.t > 0) {
+        const x = crispX(u, S.t - 1); ctx.strokeStyle = C.alpha('ink-2', 0.8);
+        ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, top + height); ctx.stroke();
+      }
+      ctx.restore();
+    }],
+    draw: [(u) => {
+      const ctx = u.ctx, { left, top, width } = u.bbox;
+      ctx.save(); ctx.textBaseline = 'middle';
+      if (pane === 'lat') {
+        const y = u.valToPos(SLO, 'y', true);
+        ctx.font = `${px(12)}px Geist, sans-serif`; ctx.fillStyle = C['ink-3']; ctx.textAlign = 'right';
+        ctx.fillText(`SLO ${SLO} ms`, left + width - px(6), y - px(9));
+      }
+      if (pane === 'traffic') {
+        ctx.font = `500 ${px(12)}px Geist, sans-serif`; ctx.textAlign = 'left';
+        let lastRight = -Infinity, row = 0;
+        for (const m of [...S.markers].sort((a, b) => a.t - b.t)) {
+          const x = u.valToPos(m.t, 'x', true); if (x < left || x > left + width) continue;
+          const w = ctx.measureText(m.label).width + px(24), h = px(20);
+          row = x < lastRight + px(6) ? (row + 1) % 3 : 0;
+          const bx = Math.min(x + px(4), left + width - w), by = top + px(6) + row * px(24);
+          ctx.fillStyle = C['surface-3']; ctx.strokeStyle = C['line-strong']; ctx.lineWidth = px(1);
+          ctx.beginPath(); ctx.roundRect(bx, by, w, h, px(4)); ctx.fill(); ctx.stroke();
+          ctx.fillStyle = C[m.color]; ctx.beginPath(); ctx.arc(bx + px(10), by + h / 2, px(3.5), 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = C['ink-2']; ctx.fillText(m.label, bx + px(18), by + h / 2 + px(0.5));
+          lastRight = bx + w;
+        }
+      }
+      ctx.restore();
+    }],
+    setCursor: [(u) => { hoverIdx = u.cursor.idx ?? null; readout(); }],
+  } });
+
+  function axes(showX) {
+    const font = '12px "Geist Mono", ui-monospace, monospace';
+    const grid = { stroke: () => C.line, width: 1 };
+    return [
+      showX ? { stroke: () => C['ink-3'], font, grid, ticks: { show: false }, gap: 6, size: 26, space: 80, values: (u, v) => v.map(fmtClock) }
+            : { grid, ticks: { show: false }, size: 0, space: 80, values: (u, v) => v.map(() => '') },
+      { stroke: () => C['ink-3'], font, grid, ticks: { show: false }, gap: 8, size: AX, space: 28 },
+    ];
+  }
+  const stepped = () => uPlot.paths.stepped({ align: 1 });
+  const L = (o) => ({ points: { show: false }, ...o });
+
+  function trafficData() {
+    const now = S.t - 1, act = S.model !== 'reactive' ? S.model : null, past = blank(), ahead = blank();
+    if (act) A.pred[act].forEach((v, s) => { if (s <= now) past[s] = v; if (s >= now && !S.fcDown) ahead[s] = v; });
+    const others = MODELS.map((m) => showShadows && m !== act ? A.pred[m].map((v, s) => s <= now ? v : null) : blank());
+    return [A.x, ...others, past, A.actual, A.actual, ahead];
+  }
+  function latData() {
+    const over = A.p95.map((v, s) => v != null && (v > SLO || A.p95[s - 1] > SLO || A.p95[s + 1] > SLO) ? v : null);
+    return [A.x, A.p95, over];
+  }
+
+  function buildCharts() {
+    charts.forEach((c) => c.destroy()); charts = [];
+    const w = $('#charts').clientWidth || 600;
+    const base = (h, showX, ymin, pane, ymax = Infinity) => ({
+      width: w, height: h, legend: { show: false }, plugins: [overlay(pane)],
+      cursor: { sync: { key: 'hz' }, y: false, points: { show: false }, drag: { x: false, y: false } },
+      scales: { x: { time: false, range: () => xRange() }, y: { range: (u, mn, mx) => [0, Math.min(ymax, Math.max(ymin, (mx || 0) * 1.15))] } },
+      axes: axes(showX),
+    });
+    // Traffic. Draw order is z-order: other models, forecast history, a surface-coloured casing,
+    // then the actual line on top, then the look-ahead. The casing keeps actual readable where it crosses the forecast.
+    charts.push(new uPlot({ ...base(210, false, 120, 'traffic'), series: [{},
+      ...MODELS.map(() => L({ stroke: () => C.alpha('ink-3', 0.5), width: 1 })),
+      L({ stroke: () => C.alpha('series-2', 0.8), width: 1.5 }),
+      L({ stroke: () => C.surface, width: 6 }),
+      L({ stroke: () => C['series-1'], width: 2, fill: () => C.alpha('series-1', 0.08) }),
+      L({ stroke: () => C['series-2'], width: 2, dash: [6, 4] }),
+    ] }, trafficData(), $('#c-traffic')));
+    // Replicas: what KEDA asked for is a wash behind the line of what's ready, so the two never sit on one stroke.
+    const rep = base(112, false, MAXR + 1, 'rep');
+    rep.scales.y.range = () => [0, MAXR + 1]; rep.axes[1].splits = () => [0, 4, 8, 12];
+    charts.push(new uPlot({ ...rep, series: [{},
+      L({ stroke: () => 'transparent', width: 1, fill: () => C.alpha('series-1', 0.18), paths: stepped() }),
+      L({ stroke: () => C['series-1'], width: 2, paths: stepped() }),
+    ] }, [A.x, A.desired, A.ready], $('#c-rep')));
+    // Latency: neutral line; red only where it breaks the SLO.
+    charts.push(new uPlot({ ...base(112, false, 400, 'lat', 1000), series: [{},
+      L({ stroke: () => C['ink-2'], width: 1.5 }),
+      L({ stroke: () => C.crit, width: 2 }),
+    ] }, latData(), $('#c-lat')));
+    charts.push(new uPlot({ ...base(138, true, 400, 'mem'), series: [{},
+      L({ stroke: () => C['ink-2'], width: 1.5, fill: () => C.alpha('ink-3', 0.08) }),
+    ] }, [A.x, A.mem], $('#c-mem')));
+    readout();
+  }
+  function updateCharts() {
+    const data = [trafficData(), [A.x, A.desired, A.ready], latData(), [A.x, A.mem]];
+    charts.forEach((c, i) => c.setData(data[i]));
+    readout();
+  }
+  const key = (c, kind = '') => `<i class="key ${kind}" style="--k:${C[c]}"></i>`;
+  const fmt = (v) => v == null ? '—' : String(Math.round(v));
+  function readout() {
+    const i = hoverIdx ?? (S.started ? clamp(S.t - 1, 0, STEPS) : null);
+    if (i == null) { for (const id of ['t-read', 'r-traffic', 'r-rep', 'r-lat', 'r-mem']) $('#' + id).textContent = ''; return; }
+    const act = S.model !== 'reactive' ? S.model : null;
+    $('#t-read').textContent = (hoverIdx == null ? 'now · ' : '') + fmtClock(i);
+    $('#r-traffic').innerHTML = `<span>${key('series-1')}actual <b>${fmt(A.actual[i])}</b></span>` +
+      (act ? `<span>${key('series-2', 'dash')}forecast · ${NAME[act]} <b>${fmt(A.pred[act][i])}</b></span>` : `<span class="muted">no forecast in reactive mode</span>`);
+    $('#r-rep').innerHTML = `<span>${key('series-1')}ready <b>${fmt(A.ready[i])}</b></span><span>${key('series-1', 'wash')}KEDA wants <b>${fmt(A.desired[i])}</b></span>`;
+    const p = A.p95[i];
+    $('#r-lat').innerHTML = `<span><b>${fmt(p)}</b> ms</span>${p > SLO ? '<span class="bad">over SLO</span>' : ''}`;
+    $('#r-mem').innerHTML = `<span><b>${fmt(A.mem[i])}</b> MB</span>`;
+  }
+  new ResizeObserver(() => { const w = $('#charts').clientWidth; charts.forEach((c) => c.setSize({ width: w, height: c.height })); }).observe($('#charts'));
+
+  // ---- simulation
+  function startRun() {
+    resetArrays(); S.noise = S.noise || makeNoise();
+    Object.assign(S, { t: 0, started: true, leak: false, bad: false, spikeAt: null, mem: 140, slo: 0, repMin: 0, peak: 0,
+      overStreak: 0, okStreak: 0, errs: [], markers: [], rawHist: [], incidents: [], pods: [] });
+    S.fcDown = false; hoverIdx = null;
+    S.run = { model: S.model, faults: new Set(), switched: false };
+    const init = clamp(Math.ceil(pattern(0) * SCALE / TARGET), MINR, MAXR);
+    for (let i = 0; i < init; i++) S.pods.push(-1);
+    S.incVer++; render(); buildCharts(); setRunning(true);
+  }
+  function setRunning(on) {
+    S.running = on; clearInterval(S.timer);
+    if (on) S.timer = setInterval(tick, 1000 / S.speed);
+    render(); renderRail();
+  }
+  function finishRun() {
+    setRunning(false);
+    const r = S.run;
+    S.runs.push({ n: S.runs.length + 1, model: r.switched ? 'mixed' : r.model, slo: S.slo, repMin: S.repMin, peak: S.peak,
+      faults: [...r.faults], comparable: !r.switched && r.faults.size === 0 });
+    announce('Day complete. Run recorded.');
+    renderRuns(); render();
+  }
+
+  function tick() {
+    const t = S.t;
+    if (t > STEPS) return finishRun();
+    let actual = pattern(hourOf(t)) * SCALE * (1 + S.noise.actual[t]);
+    if (S.spikeAt != null && t >= S.spikeAt) actual += 95 * Math.exp(-0.5 * ((t - S.spikeAt - 5) / 3) ** 2);
+    A.actual[t] = actual;
+
+    if (!S.fcDown) for (const m of MODELS) for (let s = t; s <= Math.min(t + LEAD, STEPS); s++) A.pred[m][s] = predFor(m, s);
+
+    const obs = A.actual[Math.max(0, t - 2)];
+    const predictive = predictiveNow();
+    let need = obs;
+    if (predictive) for (let s = t; s <= Math.min(t + LEAD, STEPS); s++) need = Math.max(need, A.pred[S.model][s] ?? 0);
+    const raw = clamp(Math.ceil(need / TARGET), MINR, MAXR);
+    S.rawHist.push(raw);
+    const desired = Math.max(...S.rawHist.slice(-POD_START)); // scale up now, scale down after a stabilization window
+    S.pods.sort((a, b) => a - b);
+    while (S.pods.length < desired) S.pods.push(t + POD_START);
+    while (S.pods.length > desired) S.pods.pop();
+    const ready = Math.max(1, S.pods.filter((r) => r <= t).length);
+    A.ready[t] = ready; A.desired[t] = desired;
+
+    if (S.leak) S.mem += 7;
+    A.mem[t] = S.mem;
+
+    const util = actual / (ready * TARGET / 0.8);
+    let p95 = util <= 1 ? 70 + 70 * util ** 3 : 140 + (util - 1) * 600;
+    if (S.bad) p95 += 300;
+    if (S.mem > 320) p95 += (S.mem - 320) * 1.5;
+    p95 = Math.min(2000, p95 * (1 + S.noise.lat[t]));
+    A.p95[t] = p95;
+
+    if (p95 > SLO) { S.slo += STEP_S / 60; S.overStreak++; S.okStreak = 0; } else { S.okStreak++; S.overStreak = 0; }
+    S.repMin += ready * STEP_S / 60; S.peak = Math.max(S.peak, ready);
+    if (predictive && A.pred[S.model][t] != null) { S.errs.push(Math.abs(A.pred[S.model][t] - actual)); if (S.errs.length > 40) S.errs.shift(); }
+
+    incidentsStep(t, p95);
+    S.t++;
+    render();
+  }
+
+  // ---- incidents (IntelliOps' view of the same metrics)
+  let incId = 0;
+  const open = (kind, ep) => S.incidents.find((i) => i.kind === kind && (ep == null || i.ep === ep));
+  function addIncident(inc) {
+    S.incidents.unshift({ id: ++incId, ...inc }); S.incVer++;
+    if (inc.status === 'pending') announce(`Approval needed: ${inc.title}. Proposed ${inc.playbook}.`);
+  }
+  function incidentsStep(t, p95) {
+    for (const i of S.incidents) {
+      if (i.status === 'remediating' && t >= i.doneAt) complete(i, t);
+      if (i.status === 'watching' && S.okStreak >= 2) {
+        i.status = 'resolved'; i.result = `Back under SLO after ${(t - i.openedAt) * STEP_S} s with no human action`; S.incVer++;
+      }
+    }
+    if (!S.intelli) return;
+    if (S.leak && S.mem > 230 && !open('leak', S.leakEp))
+      addIncident({ kind: 'leak', ep: S.leakEp, status: 'pending', openedAt: t, deadline: Date.now() + HITL_MS,
+        title: 'Memory leak · loadlab-backend', detail: `memory_usage_mb at ${Math.round(S.mem)} and climbing ~28 MB/min`,
+        playbook: 'restart-pod', conf: 0.88 });
+    if (S.bad && S.overStreak >= 3 && !open('bad', S.badEp))
+      addIncident({ kind: 'bad', ep: S.badEp, status: 'pending', openedAt: t, deadline: Date.now() + HITL_MS,
+        title: 'Bad deploy · loadlab-backend', detail: `latency_p99_ms ${Math.round(p95 * 1.3)} after rollout of image :bad`,
+        playbook: 'rollback-deploy', conf: 0.91 });
+    if (!S.leak && !S.bad && S.overStreak >= 2 && !S.incidents.some((i) => i.kind === 'latency' && i.status === 'watching'))
+      addIncident({ kind: 'latency', status: 'watching', openedAt: t, title: 'Latency over SLO · loadlab-backend',
+        detail: S.model === 'reactive' || S.fcDown ? 'Load arrived before new replicas were ready. Reactive scaling is catching up.'
+          : 'Traffic the forecast didn’t expect. Horizon’s reactive floor is adding replicas.',
+        note: 'No playbook: replica count belongs to Horizon in this lab (IntelliOps scale-service is off).' });
+  }
+  function complete(i, t) {
+    if (i.kind === 'leak') { S.leak = false; S.mem = 140; S.markers.push({ t, label: 'restarted', color: 'ok' }); }
+    if (i.kind === 'bad') { S.bad = false; S.markers.push({ t, label: 'rolled back', color: 'ok' }); }
+    i.status = 'resolved'; i.result = `${i.playbook} done · fixed ${(t - i.openedAt) * STEP_S} s after detection`; S.incVer++;
+  }
+  function decide(id, ok) {
+    const i = S.incidents.find((x) => x.id === id); if (!i || i.status !== 'pending') return;
+    if (ok) {
+      announce(`Approved ${i.playbook}.`);
+      if (S.running) { i.status = 'remediating'; i.doneAt = S.t + 2; }
+      else { complete(i, Math.min(S.t, STEPS)); charts.forEach((c) => c.redraw(false, false)); } // clock stopped: finish now
+    }
+    else { i.status = 'rejected'; i.result = 'Rejected. Fault left running; escalated to on-call.'; announce('Rejected.'); }
+    S.incVer++; renderRail();
+  }
+  setInterval(() => {
+    let changed = false;
+    for (const i of S.incidents) if (i.status === 'pending' && Date.now() > i.deadline) {
+      i.status = 'expired'; i.result = 'No decision in 60 s. Action aborted (fails safe).'; changed = true; }
+    if (changed) { S.incVer++; renderRail(); }
+    $$('[data-deadline]').forEach((el) => { const s = Math.max(0, Math.ceil((+el.dataset.deadline - Date.now()) / 1000));
+      el.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; });
+  }, 500);
+
+  // ---- scenarios
+  function scenario(sc) {
+    const t = Math.max(0, S.t - 1);
+    if (sc === 'spike') { S.spikeAt = S.t; S.run.faults.add('spike'); S.markers.push({ t, label: 'spike', color: 'signal' }); }
+    if (sc === 'leak') { S.leak = true; S.leakEp++; S.run.faults.add('leak'); S.markers.push({ t, label: 'leak', color: 'warn' }); }
+    if (sc === 'bad') { S.bad = true; S.badEp++; S.run.faults.add('bad deploy'); S.markers.push({ t, label: 'bad deploy', color: 'crit' }); }
+    if (sc === 'fc') { S.fcDown = !S.fcDown; S.run.faults.add('forecaster down');
+      S.markers.push({ t, label: S.fcDown ? 'forecaster down' : 'forecaster up', color: S.fcDown ? 'crit' : 'ok' }); }
+    if (sc === 'clear') {
+      S.leak = false; S.bad = false; S.mem = 140; S.spikeAt = null; S.fcDown = false;
+      for (const i of S.incidents) if (['pending', 'remediating', 'watching'].includes(i.status)) { i.status = 'resolved'; i.result = 'Fault cleared by hand.'; }
+      S.markers.push({ t, label: 'faults cleared', color: 'ink-3' }); S.incVer++;
+    }
+    $('#more').open = false;
+    render(); renderRail();
+  }
+
+  // ---- rendering
+  let lastIncVer = -1;
+  function chip(el, cls, text) { el.innerHTML = `<i class="dot ${cls}"></i>${text}`; }
+  function render() {
+    const predictive = predictiveNow();
+    chip($('#chip-fc'), S.fcDown ? 'crit pulse' : S.model === 'reactive' ? 'off' : '',
+      S.fcDown ? 'Forecaster down · reactive fallback' : S.model === 'reactive' ? 'Forecaster idle (reactive mode)' : `Forecaster · ${NAME[S.model]}`);
+    chip($('#chip-io'), S.intelli ? '' : 'off', S.intelli ? 'IntelliOps connected' : 'IntelliOps not connected');
+    chip($('#io-mini'), S.intelli ? '' : 'off', S.intelli ? 'connected' : 'offline');
+    $('#clock').textContent = !S.started ? 'Day not started' : S.t > STEPS ? 'Day complete' : `Lab clock ${fmtClock(Math.max(0, S.t - 1))}`;
+
+    for (const b of $$('#model-seg button')) b.setAttribute('aria-checked', b.dataset.model === S.model);
+    for (const b of $$('#range-seg button')) b.setAttribute('aria-checked', b.dataset.range === S.range);
+    for (const b of $$('#speed-seg button')) b.setAttribute('aria-checked', +b.dataset.speed === S.speed);
+    $('#run').textContent = S.running ? '■ Stop' : S.started ? '▶ Run again' : '▶ Run day';
+    $('#run').classList.toggle('primary', !S.running);
+    const sc = (k) => $(`[data-sc="${k}"]`);
+    sc('spike').disabled = !S.running || (S.spikeAt != null && S.t - S.spikeAt < 15);
+    sc('leak').disabled = !S.running || S.leak;
+    sc('bad').disabled = !S.running || S.bad;
+    sc('fc').disabled = !S.running || S.model === 'reactive';
+    sc('clear').disabled = !S.running;
+    $('#fc-btn').textContent = S.fcDown ? 'Restore forecaster' : 'Kill forecaster';
+    for (const k of ['spike', 'leak', 'bad']) sc(k).title = S.running ? '' : 'Start a day first';
+
+    const last = S.t - 1, p95 = A.p95?.[last], ready = A.ready?.[last], desired = A.desired?.[last];
+    const mae = S.errs.length ? S.errs.reduce((a, b) => a + b, 0) / S.errs.length : null;
+    const has = S.started && last >= 0;
+    $('#tiles').innerHTML = [
+      tile('p95 latency', has ? `<span class="${p95 > SLO ? 'bad' : ''}">${Math.round(p95)}</span> <small>ms</small>` : '—', `SLO ${SLO} ms`),
+      tile('Replicas ready', has ? `${ready} <small>/ ${MAXR}</small>` : '—', has ? (desired > ready ? `<span class="amber">${desired - ready} starting</span>` : 'none pending') : `min ${MINR} · max ${MAXR}`),
+      tile('SLO-violation min', has ? `<span class="${S.slo > 0 ? 'bad' : 'good'}">${S.slo.toFixed(2)}</span>` : '—', 'this run'),
+      tile('Forecast lead', S.fcDown ? '<span class="bad">fallback</span>' : predictive ? `+${LEAD * STEP_S} <small>s</small>` : '0 <small>s</small>',
+        S.fcDown ? 'forecaster down → reactive' : predictive ? 'matches pod start time' : 'scales after load arrives'),
+      tile('Forecast error (MAE)', !predictive ? '—' : mae == null ? '…' : `${mae.toFixed(1)} <small>rps</small>`, predictive ? `${NAME[S.model]} · last 10 min` : 'no forecast in use'),
+    ].join('');
+
+    $('#charts-hint').hidden = S.started; $('#charts').hidden = !S.started;
+    if (S.started) updateCharts();
+    if (S.incVer !== lastIncVer) renderRail();
+  }
+  const tile = (k, v, s) => `<div class="tile"><div class="k">${k}</div><div class="v mono">${v}</div><div class="s">${s}</div></div>`;
+
+  function renderRail() {
+    lastIncVer = S.incVer;
+    const box = $('#incidents');
+    // Re-rendering replaces the buttons; put keyboard focus back where it was.
+    const f = document.activeElement?.closest?.('[data-act]'), keep = f && `[data-act="${f.dataset.act}"][data-id="${f.dataset.id}"]`;
+    queueMicrotask(() => keep && box.querySelector(keep)?.focus());
+    if (!S.intelli && !S.incidents.length) {
+      box.innerHTML = `<div class="empty">IntelliOps isn't connected. Horizon keeps scaling, but leaks and bad deploys won't be detected or fixed.</div>`; return;
+    }
+    if (!S.incidents.length) {
+      box.innerHTML = `<div class="empty">No incidents. If Horizon is doing its job, the traffic peaks won't show up here.</div>`; return;
+    }
+    const dot = { pending: 'attn pulse', remediating: 'warn pulse', watching: 'warn', resolved: '', rejected: 'crit', expired: 'off' };
+    const lbl = { pending: 'Needs approval', remediating: 'Remediating…', watching: 'Watching', resolved: 'Resolved', rejected: 'Rejected', expired: 'Timed out' };
+    box.innerHTML = S.incidents.map((i) => `
+      <article class="inc ${['resolved', 'rejected', 'expired'].includes(i.status) ? 'done' : ''}" aria-label="${i.title}">
+        <div class="h"><i class="dot ${dot[i.status]}"></i>${i.title}</div>
+        <div class="m">${lbl[i.status]} · lab ${fmtClock(i.openedAt)}</div>
+        <div class="d">${i.detail}</div>
+        ${i.playbook ? `<div class="d">Proposed: <b>${i.playbook}</b> <span class="pill rev">reversible</span> <span class="muted">confidence ${i.conf.toFixed(2)}</span></div>` : ''}
+        ${i.note ? `<div class="m">${i.note}</div>` : ''}
+        ${i.status === 'pending' ? `<div class="m">Times out in <span class="mono" data-deadline="${i.deadline}"></span></div>
+          <div class="acts"><button class="approve" data-act="ok" data-id="${i.id}">Approve</button><button class="reject" data-act="no" data-id="${i.id}">Reject</button></div>` : ''}
+        ${i.result ? `<div class="m">${i.result}</div>` : ''}
+      </article>`).join('');
+  }
+
+  function renderRuns() {
+    if (!S.runs.length) { $('#runs').innerHTML = `<div class="hint" style="padding:14px">Finish a day to record a run. Try Reactive, then Holt-Winters, and compare.</div>`; return; }
+    const cmp = S.runs.filter((r) => r.comparable);
+    const bestSlo = cmp.length ? Math.min(...cmp.map((r) => r.slo)) : null, bestCost = cmp.length ? Math.min(...cmp.map((r) => r.repMin)) : null;
+    $('#runs').innerHTML = `<table><thead><tr><th>#</th><th>Scaling</th><th>SLO-violation min</th><th>Replica-min</th><th>Peak replicas</th><th>Notes</th></tr></thead><tbody>${
+      S.runs.map((r) => `<tr><td class="num">${r.n}</td><td>${NAME[r.model] || 'Mixed'}</td>
+        <td class="num">${r.slo.toFixed(2)} ${r.comparable && r.slo === bestSlo ? '<span class="tag best">best</span>' : ''}</td>
+        <td class="num">${r.repMin.toFixed(0)} ${r.comparable && r.repMin === bestCost ? '<span class="tag best">cheapest</span>' : ''}</td>
+        <td class="num">${r.peak}</td>
+        <td>${r.comparable ? '<span class="muted">clean run</span>' : (r.model === 'mixed' ? '<span class="tag">model switched</span>' : '') + r.faults.map((f) => `<span class="tag">${f}</span>`).join('')}</td></tr>`).join('')
+    }</tbody></table>`;
+  }
+  function announce(msg) { $('#announcer').textContent = ''; setTimeout(() => { $('#announcer').textContent = msg; }, 30); }
+
+  // ---- events
+  $('#run').addEventListener('click', () => { if (S.running) { setRunning(false); } else startRun(); });
+  $('#model-seg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return;
+    if (S.running && b.dataset.model !== S.model) S.run.switched = true;
+    S.model = b.dataset.model; if (S.model === 'reactive') S.fcDown = false; S.errs = []; render(); });
+  $('#range-seg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.range = b.dataset.range; render(); });
+  $('#speed-seg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.speed = +b.dataset.speed; if (S.running) setRunning(true); else render(); });
+  $$('[data-sc]').forEach((b) => b.addEventListener('click', () => scenario(b.dataset.sc)));
+  $('#incidents').addEventListener('click', (e) => { const b = e.target.closest('[data-act]'); if (b) decide(+b.dataset.id, b.dataset.act === 'ok'); });
+  $('#io-toggle').addEventListener('change', (e) => { S.intelli = e.target.checked; S.incVer++; render(); });
+  $('#shadow-toggle').addEventListener('change', (e) => { showShadows = e.target.checked; if (S.started) updateCharts(); });
+  // Arrow keys move within each radiogroup.
+  $$('[role="radiogroup"]').forEach((g) => g.addEventListener('keydown', (e) => {
+    if (!['ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+    const bs = [...g.querySelectorAll('button')], i = bs.indexOf(document.activeElement); if (i < 0) return;
+    const n = bs[(i + (e.key === 'ArrowRight' ? 1 : -1) + bs.length) % bs.length]; n.focus(); n.click(); e.preventDefault();
+  }));
+  $('#theme').addEventListener('click', () => {
+    S.theme = S.theme === 'dark' ? 'light' : 'dark'; document.documentElement.dataset.theme = S.theme;
+    $('#theme').setAttribute('aria-label', `Switch to ${S.theme === 'dark' ? 'light' : 'dark'} theme`);
+    readColors(); charts.forEach((c) => c.redraw(false, true)); readout();
+  });
+
+  // ---- init
+  if (matchMedia('(prefers-color-scheme: light)').matches) { S.theme = 'light'; document.documentElement.dataset.theme = 'light'; }
+  readColors(); resetArrays(); render(); renderRail(); renderRuns();
+  // Canvas text is drawn once with whatever font is loaded; redraw when Geist arrives so axis labels aren't the fallback face.
+  document.fonts.ready.then(() => charts.forEach((c) => c.redraw(false, true)));
+})();
+</script>
+</body>
+</html>
