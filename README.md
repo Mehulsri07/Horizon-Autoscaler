@@ -56,15 +56,7 @@ Decision Visualizer     → shows *why* a scaling decision was made, not just cl
 
 ## Roadmap
 
-- [ ] **Phase 1** — Sample app containerized and deployed to a local Kubernetes cluster (`kind`)
-- [ ] **Phase 2** — Prometheus + Grafana monitoring via `kube-prometheus-stack`
-- [ ] **Phase 3** — Load generation (synthetic seasonal pattern or replayed historical trace)
-- [ ] **Phase 4** — Decision Engine: forecasting + `max(predicted, reactive)`, fully unit-tested standalone
-- [ ] **Phase 5** — Actuator: applies Decision Engine output to the live cluster (dry-run first)
-- [ ] **Phase 5.5** — Decision-reasoning visualizer (predicted vs. actual, which side of `max()` won, replica lag)
-- [ ] **Phase 6** — Terraform-provisioned AWS EKS cluster, migrated off local `kind`
-- [ ] **Phase 7** — Quantile/conformal prediction replacing point-estimate forecasts
-- [ ] **Phase 8** (stretch) — KEDA External Scaler: Decision Engine exposed via gRPC as a proper Kubernetes-native metric provider
+Phases are tracked in the [design spec phase table](docs/superpowers/specs/2026-10-29-horizon-lab-design.md#14-phases). **Phase 1 is done:** LoadLab hardening, Kubernetes manifests in `deploy/`, and the capacity step test.
 
 ---
 
@@ -97,7 +89,9 @@ Decision Visualizer     → shows *why* a scaling decision was made, not just cl
 git clone <repo-url>
 cd horizon
 
-# Local cluster (Phase 1)
-kind create cluster --name horizon
-kubectl apply -f manifests/
+# Local cluster (Phase 1): needs Docker, kind and the loadlab-backend:local image from LoadLab
+make cluster-up   # kind cluster "horizon-lab" + load the image
+make deploy       # namespace first, then deploy/loadlab/
+make validate     # kubeconform
+make cluster-down
 ```

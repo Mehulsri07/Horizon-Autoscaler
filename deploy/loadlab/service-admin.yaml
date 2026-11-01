@@ -1,0 +1,17 @@
+# Internal only: the admin port (memory-leak switch). Never reference this from an Ingress.
+apiVersion: v1
+kind: Service
+metadata:
+  name: loadlab-backend-admin
+  namespace: loadlab
+  labels:
+    app.kubernetes.io/name: loadlab-backend
+spec:
+  type: ClusterIP
+  clusterIP: None # headless: callers target individual pods
+  selector:
+    app.kubernetes.io/name: loadlab-backend
+  ports:
+    - name: admin
+      port: 9091
+      targetPort: admin
