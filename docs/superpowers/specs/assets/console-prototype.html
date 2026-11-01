@@ -430,6 +430,7 @@
     const w = $('#charts').clientWidth || 600;
     const base = (h, showX, ymin, pane, ymax = Infinity) => ({
       width: w, height: h, legend: { show: false }, plugins: [overlay(pane)],
+      padding: [null, 16, null, null], // same right edge on every pane, or the labelled x-axis narrows its plot and the panes stop lining up
       cursor: { sync: { key: 'hz' }, y: false, points: { show: false }, drag: { x: false, y: false } },
       scales: { x: { time: false, range: () => xRange() }, y: { range: (u, mn, mx) => [0, Math.min(ymax, Math.max(ymin, (mx || 0) * 1.15))] } },
       axes: axes(showX),
