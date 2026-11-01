@@ -18,9 +18,9 @@ jobs:
       - name: Install kubeconform v0.6.7
         run: |
           curl -sSfL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
-            | tar -xz -C /usr/local/bin kubeconform
+            | sudo tar -xz -C /usr/local/bin kubeconform
           kubeconform -v
 
       # deploy/kind/cluster.yaml is a kind config, not a Kubernetes resource, so only deploy/loadlab is validated.
       - name: Validate
-        run: kubeconform -strict -summary deploy/loadlab
+        run: kubeconform -strict -summary -kubernetes-version 1.32.0 deploy/loadlab

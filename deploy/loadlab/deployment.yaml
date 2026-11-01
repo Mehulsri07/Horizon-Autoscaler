@@ -23,9 +23,6 @@ spec:
         - name: backend
           image: loadlab-backend:local
           imagePullPolicy: IfNotPresent
-          env:
-            - name: APP_VERSION
-              value: local
           ports:
             - name: http
               containerPort: 3000
@@ -43,13 +40,15 @@ spec:
               path: /readyz
               port: http
             periodSeconds: 2
-            failureThreshold: 1
+            timeoutSeconds: 3
+            failureThreshold: 2
           livenessProbe:
             httpGet:
               path: /livez
               port: http
             periodSeconds: 10
-            failureThreshold: 3
+            timeoutSeconds: 5
+            failureThreshold: 6
           lifecycle:
             preStop:
               # Native sleep: distroless has no shell. Gives kube-proxy time to drop the endpoint.

@@ -8,6 +8,7 @@ metadata:
     app.kubernetes.io/name: loadlab-backend
 spec:
   type: ClusterIP
+  clusterIP: None # headless: callers target individual pods
   selector:
     app.kubernetes.io/name: loadlab-backend
   ports:
