@@ -200,7 +200,15 @@ One `ScaledObject` on `loadlab-backend`, `minReplicaCount: 2`, `maxReplicaCount:
 1. **Forecast:** `horizon_forecast_rps{model="active",quantile="0.9"} and on() (time() - horizon_last_success_timestamp < 120)`,
    target = measured per-pod capacity at 80% utilization. A stale forecast drops out.
 2. **Reactive request rate:** the ingress request rate, same target.
-3. **CPU:** 70% of request. Catches capacity regressions (a slower release) that leave the request rate unchanged.
+3. **CPU:** 100% utilization of a CPU request sized to the CPU one pod uses at the per-pod target rate.
+   Catches capacity regressions (a slower release) that leave the request rate unchanged.
+   - **Why the request matters:** HPA utilization is usage ÷ request.
+     - With Phase 1's 250m request and a 70% target, the CPU trigger would fire at 175m. That is about 9 rps per pod, against a capacity of 40.
+     - So it would win every time and override the forecast.
+   - **What changes:** Phase 5 replaces the 250m request with the measured value, the "CPU at target" column of the capacity test (roughly 650m at `WORK_CPU_MS=20`).
+     The limit stays at 1 CPU.
+   - **Result:** at the target rate the CPU and request-rate triggers agree.
+     A release that costs more CPU per request makes the CPU trigger fire first.
 
 **HPA behavior:**
 - **Scale up:** no stabilization window; allow +100% or +4 pods every 15 s, whichever is larger.
@@ -216,6 +224,20 @@ One `ScaledObject` on `loadlab-backend`, `minReplicaCount: 2`, `maxReplicaCount:
 
 **Per-pod capacity:** measured by a k6 step test against `/work` (the highest rate at which one pod keeps p95 under the SLO).
 It's re-measured whenever the backend image changes, and drift of more than 15% raises a console warning.
+- **Record CPU too:** the step test also records the pod's average CPU at each level (from `docker stats`) as `cpu_cores`.
+- **Size the request from it:** the CPU request is the CPU at `floor(0.8 × rps_per_pod)`, interpolated between levels.
+
+**Forecast lead is measured, not assumed:** the lead has to cover the time from a scaling decision to a pod serving traffic.
+- **What it covers:** scrape + evaluation interval + scheduling + image pull + readiness.
+- **How it's measured:** the forecaster computes p90 of pod start → Ready over the last 50 pod starts, from kube-state-metrics
+  (`kube_pod_created` and `kube_pod_status_ready_time`), plus the scrape and KEDA polling intervals.
+- **How it's used:** the forecaster publishes the result as `horizon_lead_seconds` and forecasts that far ahead.
+  - The value is clamped to 30–300 s and recomputed hourly.
+  - The console's lead control can override it for experiments.
+- **Shorten the gap as well as forecasting across it:** cutting pod start time is cheaper than forecasting further ahead, and longer forecasts are less accurate.
+  - **Pre-loaded images:** images are pre-loaded on the node (`kind load`, `imagePullPolicy: IfNotPresent`).
+  - **Small image:** it stays under 25 MB.
+  - **Readiness probe:** it polls every 2 s.
 
 ---
 
@@ -333,6 +355,19 @@ Every Horizon failure degrades to plain reactive scaling, never to "no scaling".
 - **Recording rules:** `promtool test rules` with fixtures.
 - **End-to-end smoke test on kind** with a 5-min day: forecasts published, `ScaledObject` Ready, replicas > 2 at the peak,
   DDoS scenario held at the cap. Pass/fail only.
+- **Offline policy simulator (`sim/`, pure Python, no cluster):** the scaling policy as code. It replays a trace day plus scenario overlays in seconds.
+  - **What it models:**
+    - KEDA's max-of-triggers;
+    - HPA scale-up/down limits and the stabilization window;
+    - forecast-aware scale-down;
+    - the measured pod start delay;
+    - a latency model calibrated from the capacity test.
+  - **Inputs:** recorded forecasts, or the models run in-process.
+  - **CI regression gate:** each policy, model or parameter change runs every model × {normal day, flash sale, surprise spike, DDoS}.
+    - It asserts SLO-violation minutes and replica-minutes stay within 10% of the committed baseline in `sim/baseline.json`.
+    - A deliberate improvement updates the baseline in the same PR.
+  - **Relationship to the kind runs:** the trial and the benchmark confirm on a real cluster what the simulator predicts. A gap of more than 20% between the two is itself a finding to explain.
+  - **Console:** the prototype's simulation is ported from this, so the console and CI agree.
 
 **Benchmark (local, `make bench`):**
 - **Setup:** 3 trace days × {reactive, naive, hw, gbm} × 3 runs × both compression profiles. Fixed seed for the scenario overlays.
@@ -382,8 +417,8 @@ Each one writes what happened to latency and replicas.
 | 1 | LoadLab hardening (section 3) + Kubernetes manifests + capacity step test | LoadLab, Horizon `deploy/` |
 | 2 | kind lab: ingress-nginx, Prometheus (retention, PVC, recording rules), KEDA, kube-state-metrics; `make up` with the `trial` / `demo` profiles | Horizon |
 | 3 | Traffic: NASA preprocessing, replayer with checkpoints, k6 scenarios | Horizon `traffic/` |
-| 4 | Forecaster: models, conformal q90, metrics, Parquet history, routing; unit-tested with no cluster | Horizon `forecaster/` |
-| 5 | KEDA ScaledObject + HPA behavior + event calendar; end-to-end smoke test in CI | Horizon `deploy/` |
+| 4 | Forecaster: models, conformal q90, metrics, Parquet history, routing, measured lead (`horizon_lead_seconds`); offline policy simulator with its CI gate; unit-tested with no cluster | Horizon `forecaster/`, `sim/` |
+| 5 | KEDA ScaledObject + HPA behavior + event calendar; capacity test records CPU per level and the CPU request is sized from it (section 6); end-to-end smoke test in CI | Horizon `deploy/`, LoadLab `scripts/` |
 | 6 | Console (from the prototype) | Horizon `console/` |
 | 7 | IntelliOps overlay + recording rules + DDoS source signal | IntelliOps fork, Horizon |
 | 8 | Shadow trial (one trace month), evaluation, promotion | Horizon `results/` |

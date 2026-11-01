@@ -77,7 +77,7 @@
 
   .layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; }
   .main { padding: 14px 16px; display: grid; gap: 12px; border-right: 1px solid rgb(var(--line)); min-width: 0; }
-  .tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+  .tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
   .tile { background: rgb(var(--surface)); border: 1px solid rgb(var(--line)); border-radius: 8px; padding: 10px 12px; }
   .tile .k { font-size: 12px; color: rgb(var(--ink-3)); }
   .tile .v { font-size: 22px; font-weight: 600; margin-top: 2px; white-space: nowrap; }
@@ -106,6 +106,7 @@
   .chart { width: 100%; }
   .chart .u-over { cursor: crosshair; }
 
+  #runs { overflow-x: auto; } /* ten columns: scroll the table, not the page, on narrow screens */
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid rgb(var(--line)); }
   th { font-weight: 500; color: rgb(var(--ink-3)); font-size: 12px; }
@@ -137,7 +138,8 @@
     border: 1px dashed rgb(var(--line-strong)); border-radius: 8px; padding: 10px 14px; }
   .proto label { display: inline-flex; gap: 6px; align-items: center; color: rgb(var(--ink-2)); }
 
-  @media (max-width: 1100px) { .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  /* Six tiles: one row while each tile fits a "123 pod-min" value, then 3 × 2. */
+  @media (max-width: 1360px) { .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
   @media (max-width: 920px) {
     .layout { grid-template-columns: 1fr; }
     .main { border-right: 0; border-bottom: 1px solid rgb(var(--line)); }
@@ -175,6 +177,15 @@
           <button role="radio" data-model="naive">Naive</button>
           <button role="radio" data-model="hw">Holt-Winters</button>
           <button role="radio" data-model="gbm">GBM</button>
+        </div>
+      </div>
+      <div class="group">
+        <span class="glabel" id="lbl-lead">Lead</span>
+        <div class="seg" role="radiogroup" aria-labelledby="lbl-lead" id="lead-seg">
+          <button role="radio" data-lead="2">30s</button>
+          <button role="radio" data-lead="4">1m</button>
+          <button role="radio" data-lead="8">2m</button>
+          <button role="radio" data-lead="16">4m</button>
         </div>
       </div>
       <div class="group" role="group" aria-label="Scenarios">
@@ -236,7 +247,7 @@
         </div>
 
         <div class="card">
-          <div class="card-h"><h2>Runs this session</h2><span class="muted" style="font-size:12px">Same traffic seed every run. Runs with injected faults or a mid-run model switch don't count toward “best”.</span></div>
+          <div class="card-h"><h2>Runs this session</h2><span class="muted" style="font-size:12px">Same traffic seed every run. Runs with injected faults or a mid-run model or lead switch don't count toward “best”.</span></div>
           <div id="runs"></div>
         </div>
       </section>
@@ -259,8 +270,9 @@
 <script>
 (() => {
   // ---- constants (compressed day: 240 steps × 15 s = 60 lab-minutes = 24 "clock" hours)
-  const STEPS = 240, STEP_S = 15, LEAD = 8, POD_START = 8, TARGET = 24, MINR = 2, MAXR = 12, SCALE = 215;
-  const SLO = 200, HITL_MS = 60000, AX = 48;
+  const STEPS = 240, STEP_S = 15, MAX_LEAD = 16, POD_START = 8, TARGET = 24, MINR = 2, MAXR = 12, SCALE = 215;
+  const SLO = 200, HITL_MS = 60000, AX = 48, MEM_HURT = 250; // MEM_HURT: MB per pod where the leak starts costing latency
+  const PRICE = 0.04; // USD per pod-hour (1 vCPU / 128 MiB): an illustrative on-demand price, not a quote
   const MODELS = ['naive', 'hw', 'gbm'];
   const NAME = { reactive: 'Reactive', naive: 'Naive', hw: 'Holt-Winters', gbm: 'GBM' };
   const NOISE = { naive: 0.10, hw: 0.06, gbm: 0.035 };
@@ -279,8 +291,8 @@
 
   // ---- state
   const S = {
-    running: false, t: 0, model: 'hw', speed: 4, range: 'day', theme: 'dark', intelli: true,
-    fcDown: false, leak: false, bad: false, spikeAt: null, mem: 140, leakEp: 0, badEp: 0,
+    running: false, t: 0, model: 'hw', lead: 8, speed: 4, range: 'day', theme: 'dark', intelli: true,
+    fcDown: false, leak: false, bad: false, spikeAt: null, mem: 140, leakEp: 0, badEp: 0, episodes: [], // episodes: { kind, from, to } fault windows
     pods: [], rawHist: [], slo: 0, repMin: 0, peak: 0, overStreak: 0, okStreak: 0, errs: [],
     incidents: [], incVer: 0, markers: [], runs: [], run: null, timer: null, noise: null, started: false,
   };
@@ -293,10 +305,11 @@
   }
   function makeNoise() {
     const g = gaussGen(mulberry32(20261029));
-    const arr = (sd) => Array.from({ length: STEPS + LEAD + 1 }, () => g() * sd);
+    const arr = (sd) => Array.from({ length: STEPS + MAX_LEAD + 1 }, () => g() * sd);
     return { actual: arr(0.04), lat: arr(0.05), naive: arr(NOISE.naive), hw: arr(NOISE.hw), gbm: arr(NOISE.gbm) };
   }
-  const predFor = (m, s) => Math.max(0, pattern(hourOf(s)) * SCALE * (1 + S.noise[m][s]));
+  // ponytail: crude horizon-error model (noise grows with √lead, 2m = today's noise); swap for per-horizon backtest error when the lab has it.
+  const predFor = (m, s) => Math.max(0, pattern(hourOf(s)) * SCALE * (1 + S.noise[m][s] * Math.sqrt(S.lead / 8)));
   const predictiveNow = () => S.model !== 'reactive' && !S.fcDown;
 
   // ---- colors (read from tokens; canvas wants comma rgb)
@@ -318,14 +331,25 @@
   // Snap a canvas x to the pixel grid so 1px rules stay crisp instead of smearing over two pixels.
   const crispX = (u, v) => Math.round(u.valToPos(v, 'x', true)) + 0.5;
 
-  // Under the series: forecast window, SLO band, event rules and the "now" rule. Over the series: event flags.
+  // Under the series: fault windows, forecast window, SLO band, memory-impact line, event rules and the "now" rule.
+  // Over the series: event flags.
   const overlay = (pane) => ({ hooks: {
     drawAxes: [(u) => {
       const ctx = u.ctx, { left, top, width, height } = u.bbox;
       ctx.save(); ctx.beginPath(); ctx.rect(left, top, width, height); ctx.clip(); ctx.lineWidth = px(1);
+      // Fault windows on every pane: leak → restart, bad deploy → rollback. An open one runs to "now".
+      for (const e of S.episodes) {
+        const a = u.valToPos(e.from, 'x', true), b = u.valToPos(e.to ?? Math.max(e.from, S.t - 1), 'x', true);
+        ctx.fillStyle = e.kind === 'leak' ? C.alpha('warn', 0.07) : C.alpha('crit', 0.06); ctx.fillRect(a, top, b - a, height);
+      }
       if (pane === 'traffic' && S.started && predictiveNow() && S.t > 0) {
-        const a = u.valToPos(S.t - 1, 'x', true), b = u.valToPos(Math.min(S.t - 1 + LEAD, STEPS), 'x', true);
+        const a = u.valToPos(S.t - 1, 'x', true), b = u.valToPos(Math.min(S.t - 1 + S.lead, STEPS), 'x', true);
         ctx.fillStyle = C.alpha('series-2', 0.08); ctx.fillRect(a, top, b - a, height);
+      }
+      if (pane === 'mem') {
+        const y = Math.round(u.valToPos(MEM_HURT, 'y', true)) + 0.5;
+        ctx.strokeStyle = C.alpha('warn', 0.65); ctx.setLineDash([px(4), px(4)]);
+        ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(left + width, y); ctx.stroke(); ctx.setLineDash([]);
       }
       if (pane === 'lat') {
         const y = Math.round(u.valToPos(SLO, 'y', true)) + 0.5;
@@ -349,10 +373,19 @@
         ctx.font = `${px(12)}px Geist, sans-serif`; ctx.fillStyle = C['ink-3']; ctx.textAlign = 'right';
         ctx.fillText(`SLO ${SLO} ms`, left + width - px(6), y - px(9));
       }
+      if (pane === 'mem') {
+        const y = u.valToPos(MEM_HURT, 'y', true);
+        ctx.font = `${px(12)}px Geist, sans-serif`; ctx.fillStyle = C['ink-3']; ctx.textAlign = 'right';
+        ctx.fillText('latency impact', left + width - px(6), y - px(9));
+      }
       if (pane === 'traffic') {
         ctx.font = `500 ${px(12)}px Geist, sans-serif`; ctx.textAlign = 'left';
         let lastRight = -Infinity, row = 0;
-        for (const m of [...S.markers].sort((a, b) => a.t - b.t)) {
+        // An open fault window adds a pointer flag at its start (it stacks under the fault's own flag):
+        // traffic and replicas don't move for a leak or a bad deploy, so say where the damage shows.
+        const hints = S.episodes.filter((e) => e.to == null).map((e) => e.kind === 'leak'
+          ? { t: e.from, label: 'memory ↓ see Memory pane', color: 'warn' } : { t: e.from, label: 'latency ↓ see p95', color: 'crit' });
+        for (const m of [...S.markers, ...hints].sort((a, b) => a.t - b.t)) {
           const x = u.valToPos(m.t, 'x', true); if (x < left || x > left + width) continue;
           const w = ctx.measureText(m.label).width + px(24), h = px(20);
           row = x < lastRight + px(6) ? (row + 1) % 3 : 0;
@@ -397,6 +430,7 @@
     const w = $('#charts').clientWidth || 600;
     const base = (h, showX, ymin, pane, ymax = Infinity) => ({
       width: w, height: h, legend: { show: false }, plugins: [overlay(pane)],
+      padding: [null, 16, null, null], // same right edge on every pane, or the labelled x-axis narrows its plot and the panes stop lining up
       cursor: { sync: { key: 'hz' }, y: false, points: { show: false }, drag: { x: false, y: false } },
       scales: { x: { time: false, range: () => xRange() }, y: { range: (u, mn, mx) => [0, Math.min(ymax, Math.max(ymin, (mx || 0) * 1.15))] } },
       axes: axes(showX),
@@ -452,9 +486,9 @@
   function startRun() {
     resetArrays(); S.noise = S.noise || makeNoise();
     Object.assign(S, { t: 0, started: true, leak: false, bad: false, spikeAt: null, mem: 140, slo: 0, repMin: 0, peak: 0,
-      overStreak: 0, okStreak: 0, errs: [], markers: [], rawHist: [], incidents: [], pods: [] });
+      overStreak: 0, okStreak: 0, errs: [], markers: [], episodes: [], rawHist: [], incidents: [], pods: [] });
     S.fcDown = false; hoverIdx = null;
-    S.run = { model: S.model, faults: new Set(), switched: false };
+    S.run = { model: S.model, lead: S.lead, faults: new Set(), switched: false, leadChanged: false };
     const init = clamp(Math.ceil(pattern(0) * SCALE / TARGET), MINR, MAXR);
     for (let i = 0; i < init; i++) S.pods.push(-1);
     S.incVer++; render(); buildCharts(); setRunning(true);
@@ -464,11 +498,18 @@
     if (on) S.timer = setInterval(tick, 1000 / S.speed);
     render(); renderRail();
   }
+  // Baseline without autoscaling: a fixed fleet sized for the day's peak so far, running every elapsed step.
+  function savings() {
+    const staticN = clamp(Math.ceil(Math.max(0, ...A.actual.slice(0, S.t)) / TARGET), MINR, MAXR);
+    const staticMin = staticN * S.t * STEP_S / 60, saved = staticMin - S.repMin;
+    return { staticN, staticMin, saved, pct: staticMin ? saved / staticMin : 0 };
+  }
   function finishRun() {
     setRunning(false);
-    const r = S.run;
-    S.runs.push({ n: S.runs.length + 1, model: r.switched ? 'mixed' : r.model, slo: S.slo, repMin: S.repMin, peak: S.peak,
-      faults: [...r.faults], comparable: !r.switched && r.faults.size === 0 });
+    const r = S.run, sv = savings();
+    S.runs.push({ n: S.runs.length + 1, model: r.switched ? 'mixed' : r.model, lead: r.lead, slo: S.slo, repMin: S.repMin, peak: S.peak,
+      staticN: sv.staticN, staticMin: sv.staticMin, saved: sv.saved, leadChanged: r.leadChanged,
+      faults: [...r.faults], comparable: !r.switched && !r.leadChanged && r.faults.size === 0 });
     announce('Day complete. Run recorded.');
     renderRuns(); render();
   }
@@ -480,12 +521,12 @@
     if (S.spikeAt != null && t >= S.spikeAt) actual += 95 * Math.exp(-0.5 * ((t - S.spikeAt - 5) / 3) ** 2);
     A.actual[t] = actual;
 
-    if (!S.fcDown) for (const m of MODELS) for (let s = t; s <= Math.min(t + LEAD, STEPS); s++) A.pred[m][s] = predFor(m, s);
+    if (!S.fcDown) for (const m of MODELS) for (let s = t; s <= Math.min(t + S.lead, STEPS); s++) A.pred[m][s] = predFor(m, s);
 
     const obs = A.actual[Math.max(0, t - 2)];
     const predictive = predictiveNow();
     let need = obs;
-    if (predictive) for (let s = t; s <= Math.min(t + LEAD, STEPS); s++) need = Math.max(need, A.pred[S.model][s] ?? 0);
+    if (predictive) for (let s = t; s <= Math.min(t + S.lead, STEPS); s++) need = Math.max(need, A.pred[S.model][s] ?? 0);
     const raw = clamp(Math.ceil(need / TARGET), MINR, MAXR);
     S.rawHist.push(raw);
     const desired = Math.max(...S.rawHist.slice(-POD_START)); // scale up now, scale down after a stabilization window
@@ -501,7 +542,7 @@
     const util = actual / (ready * TARGET / 0.8);
     let p95 = util <= 1 ? 70 + 70 * util ** 3 : 140 + (util - 1) * 600;
     if (S.bad) p95 += 300;
-    if (S.mem > 320) p95 += (S.mem - 320) * 1.5;
+    if (S.mem > MEM_HURT) p95 += (S.mem - MEM_HURT) * 1.5; // above the incident threshold (230), so an unapproved leak hurts
     p95 = Math.min(2000, p95 * (1 + S.noise.lat[t]));
     A.p95[t] = p95;
 
@@ -543,9 +584,11 @@
           : 'Traffic the forecast didn’t expect. Horizon’s reactive floor is adding replicas.',
         note: 'No playbook: replica count belongs to Horizon in this lab (IntelliOps scale-service is off).' });
   }
+  // Close the open fault window(s) of a kind; their shading stops at t.
+  const endEpisode = (kind, t) => { for (const e of S.episodes) if (e.kind === kind && e.to == null) e.to = t; };
   function complete(i, t) {
-    if (i.kind === 'leak') { S.leak = false; S.mem = 140; S.markers.push({ t, label: 'restarted', color: 'ok' }); }
-    if (i.kind === 'bad') { S.bad = false; S.markers.push({ t, label: 'rolled back', color: 'ok' }); }
+    if (i.kind === 'leak') { S.leak = false; S.mem = 140; endEpisode('leak', t); S.markers.push({ t, label: 'restarted', color: 'ok' }); }
+    if (i.kind === 'bad') { S.bad = false; endEpisode('bad', t); S.markers.push({ t, label: 'rolled back', color: 'ok' }); }
     i.status = 'resolved'; i.result = `${i.playbook} done · fixed ${(t - i.openedAt) * STEP_S} s after detection`; S.incVer++;
   }
   function decide(id, ok) {
@@ -571,12 +614,14 @@
   function scenario(sc) {
     const t = Math.max(0, S.t - 1);
     if (sc === 'spike') { S.spikeAt = S.t; S.run.faults.add('spike'); S.markers.push({ t, label: 'spike', color: 'signal' }); }
-    if (sc === 'leak') { S.leak = true; S.leakEp++; S.run.faults.add('leak'); S.markers.push({ t, label: 'leak', color: 'warn' }); }
-    if (sc === 'bad') { S.bad = true; S.badEp++; S.run.faults.add('bad deploy'); S.markers.push({ t, label: 'bad deploy', color: 'crit' }); }
+    if (sc === 'leak') { S.leak = true; S.leakEp++; S.run.faults.add('leak'); S.episodes.push({ kind: 'leak', from: t, to: null });
+      S.markers.push({ t, label: 'leak', color: 'warn' }); }
+    if (sc === 'bad') { S.bad = true; S.badEp++; S.run.faults.add('bad deploy'); S.episodes.push({ kind: 'bad', from: t, to: null });
+      S.markers.push({ t, label: 'bad deploy', color: 'crit' }); }
     if (sc === 'fc') { S.fcDown = !S.fcDown; S.run.faults.add('forecaster down');
       S.markers.push({ t, label: S.fcDown ? 'forecaster down' : 'forecaster up', color: S.fcDown ? 'crit' : 'ok' }); }
     if (sc === 'clear') {
-      S.leak = false; S.bad = false; S.mem = 140; S.spikeAt = null; S.fcDown = false;
+      S.leak = false; S.bad = false; S.mem = 140; S.spikeAt = null; S.fcDown = false; endEpisode('leak', t); endEpisode('bad', t);
       for (const i of S.incidents) if (['pending', 'remediating', 'watching'].includes(i.status)) { i.status = 'resolved'; i.result = 'Fault cleared by hand.'; }
       S.markers.push({ t, label: 'faults cleared', color: 'ink-3' }); S.incVer++;
     }
@@ -596,6 +641,8 @@
     $('#clock').textContent = !S.started ? 'Day not started' : S.t > STEPS ? 'Day complete' : `Lab clock ${fmtClock(Math.max(0, S.t - 1))}`;
 
     for (const b of $$('#model-seg button')) b.setAttribute('aria-checked', b.dataset.model === S.model);
+    for (const b of $$('#lead-seg button')) { b.setAttribute('aria-checked', +b.dataset.lead === S.lead);
+      b.disabled = S.model === 'reactive'; b.title = b.disabled ? 'Reactive scaling has no forecast' : ''; }
     for (const b of $$('#range-seg button')) b.setAttribute('aria-checked', b.dataset.range === S.range);
     for (const b of $$('#speed-seg button')) b.setAttribute('aria-checked', +b.dataset.speed === S.speed);
     $('#run').textContent = S.running ? '■ Stop' : S.started ? '▶ Run again' : '▶ Run day';
@@ -611,14 +658,18 @@
 
     const last = S.t - 1, p95 = A.p95?.[last], ready = A.ready?.[last], desired = A.desired?.[last];
     const mae = S.errs.length ? S.errs.reduce((a, b) => a + b, 0) / S.errs.length : null;
-    const has = S.started && last >= 0;
+    const has = S.started && last >= 0, sv = has ? savings() : null;
     $('#tiles').innerHTML = [
       tile('p95 latency', has ? `<span class="${p95 > SLO ? 'bad' : ''}">${Math.round(p95)}</span> <small>ms</small>` : '—', `SLO ${SLO} ms`),
       tile('Replicas ready', has ? `${ready} <small>/ ${MAXR}</small>` : '—', has ? (desired > ready ? `<span class="amber">${desired - ready} starting</span>` : 'none pending') : `min ${MINR} · max ${MAXR}`),
       tile('SLO-violation min', has ? `<span class="${S.slo > 0 ? 'bad' : 'good'}">${S.slo.toFixed(2)}</span>` : '—', 'this run'),
-      tile('Forecast lead', S.fcDown ? '<span class="bad">fallback</span>' : predictive ? `+${LEAD * STEP_S} <small>s</small>` : '0 <small>s</small>',
-        S.fcDown ? 'forecaster down → reactive' : predictive ? 'matches pod start time' : 'scales after load arrives'),
+      tile('Forecast lead', S.fcDown ? '<span class="bad">fallback</span>' : predictive ? `+${S.lead * STEP_S} <small>s</small>` : '0 <small>s</small>',
+        S.fcDown ? 'forecaster down → reactive' : !predictive ? 'scales after load arrives'
+          : S.lead < POD_START ? '<span class="amber">shorter than pod start: scales late</span>'
+          : S.lead === POD_START ? 'matches pod start time' : 'longer than pod start: pods idle early'),
       tile('Forecast error (MAE)', !predictive ? '—' : mae == null ? '…' : `${mae.toFixed(1)} <small>rps</small>`, predictive ? `${NAME[S.model]} · last 10 min` : 'no forecast in use'),
+      tile('Pods saved', has ? `<span class="${sv.saved > 0 ? 'good' : ''}">${Math.round(sv.saved)}</span> <small>pod-min</small>` : '—',
+        has ? `${Math.round(sv.pct * 100)}% vs fixed fleet of ${sv.staticN}` : 'vs a fixed fleet sized for the peak'),
     ].join('');
 
     $('#charts-hint').hidden = S.started; $('#charts').hidden = !S.started;
@@ -658,13 +709,25 @@
     if (!S.runs.length) { $('#runs').innerHTML = `<div class="hint" style="padding:14px">Finish a day to record a run. Try Reactive, then Holt-Winters, and compare.</div>`; return; }
     const cmp = S.runs.filter((r) => r.comparable);
     const bestSlo = cmp.length ? Math.min(...cmp.map((r) => r.slo)) : null, bestCost = cmp.length ? Math.min(...cmp.map((r) => r.repMin)) : null;
-    $('#runs').innerHTML = `<table><thead><tr><th>#</th><th>Scaling</th><th>SLO-violation min</th><th>Replica-min</th><th>Peak replicas</th><th>Notes</th></tr></thead><tbody>${
+    // Clean predictive runs are priced against the latest clean Reactive run: extra pod-min spent, SLO-min avoided.
+    const base = cmp.filter((r) => r.model === 'reactive').pop();
+    const sgn = (v, d = 0) => (v < 0 ? '−' : '+') + Math.abs(v).toFixed(d);
+    const usd = (v) => (v < 0 ? '−$' : '$') + Math.abs(Math.round(v));
+    const leadLbl = (l) => l * STEP_S < 60 ? `${l * STEP_S}s` : `${l * STEP_S / 60}m`;
+    $('#runs').innerHTML = `<table><thead><tr><th>#</th><th>Scaling</th><th>Lead</th><th>SLO-violation min</th><th>Replica-min</th><th>Saved vs fixed fleet</th>
+      <th>Real pod-h/day</th><th>Est. saved $/mo</th><th>Peak replicas</th><th>Notes</th></tr></thead><tbody>${
       S.runs.map((r) => `<tr><td class="num">${r.n}</td><td>${NAME[r.model] || 'Mixed'}</td>
+        <td class="num">${r.model === 'reactive' ? '—' : leadLbl(r.lead)}</td>
         <td class="num">${r.slo.toFixed(2)} ${r.comparable && r.slo === bestSlo ? '<span class="tag best">best</span>' : ''}</td>
         <td class="num">${r.repMin.toFixed(0)} ${r.comparable && r.repMin === bestCost ? '<span class="tag best">cheapest</span>' : ''}</td>
+        <td class="num">${Math.round(r.saved)} pod-min · ${Math.round(r.staticMin ? r.saved / r.staticMin * 100 : 0)}%
+          ${base && r.comparable && r.model !== 'reactive' ? `<span class="tag" title="Compared with clean Reactive run #${base.n}">vs reactive ${sgn(r.repMin - base.repMin)} pod-min, ${sgn(r.slo - base.slo, 1)} SLO min</span>` : ''}</td>
+        <td class="num">${(r.repMin * 24 / 60).toFixed(1)}</td>
+        <td class="num">${usd((r.saved * 24 / 60) * 30 * PRICE)}</td>
         <td class="num">${r.peak}</td>
-        <td>${r.comparable ? '<span class="muted">clean run</span>' : (r.model === 'mixed' ? '<span class="tag">model switched</span>' : '') + r.faults.map((f) => `<span class="tag">${f}</span>`).join('')}</td></tr>`).join('')
-    }</tbody></table>`;
+        <td>${r.comparable ? '<span class="muted">clean run</span>' : (r.model === 'mixed' ? '<span class="tag">model switched</span>' : '') + (r.leadChanged ? '<span class="tag">lead changed</span>' : '') + r.faults.map((f) => `<span class="tag">${f}</span>`).join('')}</td></tr>`).join('')
+    }</tbody></table>
+    <div class="hint" style="padding:10px 0 0">Savings compare against a fixed fleet sized for the day's peak. $ uses an illustrative $0.04 per pod-hour; one lab day stands for 24 real hours.</div>`;
   }
   function announce(msg) { $('#announcer').textContent = ''; setTimeout(() => { $('#announcer').textContent = msg; }, 30); }
 
@@ -673,6 +736,9 @@
   $('#model-seg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return;
     if (S.running && b.dataset.model !== S.model) S.run.switched = true;
     S.model = b.dataset.model; if (S.model === 'reactive') S.fcDown = false; S.errs = []; render(); });
+  $('#lead-seg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b || b.disabled) return;
+    if (S.running && +b.dataset.lead !== S.lead) S.run.leadChanged = true;
+    S.lead = +b.dataset.lead; render(); });
   $('#range-seg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.range = b.dataset.range; render(); });
   $('#speed-seg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.speed = +b.dataset.speed; if (S.running) setRunning(true); else render(); });
   $$('[data-sc]').forEach((b) => b.addEventListener('click', () => scenario(b.dataset.sc)));
